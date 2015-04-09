@@ -1,4 +1,3 @@
-#using Distributions:
 normalize(X) = X - repmat(sum(X, 1)/size(X, 1), size(X, 1));
 
 function genvud(n = 100, d = 20)
@@ -21,23 +20,26 @@ function PCA2(X, k::Int64, ϵ::Float64, w0 = 0.0)
   Y = zeros(Float64, (n, l));
   println("Starting loop with l = ",l," l2 = ",l2)
   for t = 1:n
-    println("Iteration - ",t)
+    if t% 200 == 0
+      println("Iteration - ",t)
+    end
     x_t = X[t,:]';
     w = w + norm(x_t)^2;
     r = x_t - U*U'*x_t;
     c1 = (I - (U*U'));
     C = c1*(Z*Z')*c1;
-    println("C + r*r': ", norm(C + (r*r')))
-    println("C: ", norm(C))
-    println("r*r': ", norm(r*r'))
-    println("max(w0, w)*(k/(ϵ^2)): ", max(w0, w)*(k/(ϵ^2)))
-    println("w0: ", w0)
-    println("w: ", w)
-    println("k: ", k)
-    println("ϵ^2: ", ϵ^2)
-    println(" ")
+#     println("C + r*r': ", norm(C + (r*r')))
+#     println("C: ", norm(C))
+#     println("r*r': ", norm(r*r'))
+#     println("max(w0, w)*(k/(ϵ^2)): ", max(w0, w)*(k/(ϵ^2)))
+#     println("w0: ", w0)
+#     println("w: ", w)
+#     println("k: ", k)
+#     println("ϵ^2: ", ϵ^2)
+#     println(" ")
+    zero_row = 1;
     while norm(C + (r*r')) >= max(w0, w)*(k/(ϵ^2))
-      println("Inner loop")
+      #println("Inner loop")
       λ, u = eigs(C, nev = 1, which = :LM);
       if idx < l
         w_u[idx] = λ[1];
@@ -53,16 +55,13 @@ function PCA2(X, k::Int64, ϵ::Float64, w0 = 0.0)
       c1 = (I - (U*U'));
       C = c1*(Z*Z')*c1;
       r = x_t - U*U'x_t;
-      print(t)
-      print(" - ")
-      println(idx)
+      #print(t)
+      #print(" - ")
+      #println(idx)
     end
 
-    if t <= l2
-        Z[:, t] = r;
-    else
-        Z = Sketch(r, Z);
-    end
+    Z, zero_row = sketch(r, Z', zero_row);
+    Z = Z';
 
     for i = 1:idx
       u = U[:, i];
@@ -73,13 +72,41 @@ function PCA2(X, k::Int64, ϵ::Float64, w0 = 0.0)
   return Y;
 end
 
-function Sketch(rt, Z)
-    d, l = size(Z);
-    U, Σ, V = svd(Z);
-    δ = Σ[int(l/2)]^2;
-    Sig = sqrt(max(Σ.^2 - eye(l)*δ, 0));
-    B = diag(Sig)*V';
-    return B
+function SimpleSketch(A::DenseMatrix{Float64}, l)
+  n, m = size(A);
+  #A = A; #work col wise...
+  zero_row = 1;
+  B = zeros(Float64, l, m);
+  for i = 1:n
+    B, zero_row = Sketch(A[i,:], B, zero_row);
+  end
+  return B;
+end
+
+function sketch(rt::DenseMatrix{Float64}, B::DenseMatrix{Float64}, zero_row)
+  l, m = size(B);
+  if zero_row <= l
+    B[zero_row, :] = rt;
+    return B, (zero_row + 1);
+  else
+    U, Σ, V = svd(B);
+    δ = Σ[int(l/2)];
+    Sig = sqrt(max(Σ.^2 .- δ, 0));
+    B = diagm(Sig)*V';
+    zr = min_zero_idx(B); # could do this waaaay faster!
+    return B, zr;
+  end
+end
+
+function min_zero_idx(A)
+  s = sum(A,2);
+  n, m = size(A);
+  for i = 1:n
+    if abs(s[i]) < 1e-20
+      return(i)
+    end
+  end
+  return(n+1)
 end
 
 function PCA1(X, k::Int64, ϵ::Float64)
@@ -93,54 +120,20 @@ function PCA1(X, k::Int64, ϵ::Float64)
   Y = zeros(Float64, (n, l));
   idx = 1;
   for t = 1:n
-    println("Iteration: ",t)
+    if t%500 == 0
+      println("Iteration: ",t)
+    end
     x_t = X[t,:]';
-    #println(size(x_t), size(U))
-    #println("Calc r:")
     r = x_t - U*U'*x_t;
-    #println(size(r))
-    #println("norm(C + r*r'): ", norm(C + (r*r')))
-    #println(" 2*X_F^2/l: ",  2*X_F^2/l)
-    #println(" X_F^2: ",  X_F^2)
     while norm(C + r*r') ≥ 2*(X_F^2)/l
-      println("Correcting U - idx:", idx)
       λ, u = eigs(C, nev = 1, which = :LM);
       U[:, idx] = real(u);
       idx = idx + 1;
       C = C - λ[1]*u*u';
       r = x_t - U*U'x_t;
-      println(norm(r))
-      #println(t, ' - ', idx)
     end
-    #println("Calc C:")
     C = C + r*r';
-    #println("Calc Y:")
     Y[t, :] = U'*x_t;
   end
   return Y;
 end
-
-#n = 1500;
-#d = 300;
-#k = 5;
-#ϵ = 0.5;
-
-#println("Generating X with dim ",n,"x",d,". Target dim: ",n,"x",int(ceil(8*k/(ϵ^2))));
-#@time u, Σ, v = genvud(n, d)
-#X = u*diagm(Σ)*v;
-#X = X ./ maximum(X, 1);
-#X = rand((100,1),(n, d));
-#println("Size of X: ", size(X));
-#println("Running PCA");
-#@time PCA1(X, k, ϵ)
-
-#l = int(ceil(k/(ϵ^2)))
-
-#maximum([norm(X[i,:])^2 for i = 1:n])
-
-#vecnorm(X, 2)^2 / 160
-
-#A = rand(10, 10)
-#norm(A)
-#u, d, v = svd(A);
-#maximum(d)
