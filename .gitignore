@@ -1,0 +1,10 @@
+.DS_Store
+.ipynb_checkpoints/
+*.m~
+*.zip
+*.aux
+*.bbl
+*.log
+*.blg
+*.pdf
+*.gz
