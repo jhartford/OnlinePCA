@@ -1,8 +1,10 @@
 using MultivariateStats, GLM
+println("Reading data");
 X = readcsv("mnistHelper/mnist.csv");
 y = readcsv("mnistHelper/mnist-label.csv");
 include("OnlinePCA.jl");
-
+println("Read data... starting analysis");
+logistic(X) = 1./(1 + exp(-X));
 function run_tests(X, y, test_set_prop = 0.1)
   n, m = size(X);
   test = int(n*test_set_prop)
@@ -30,7 +32,7 @@ for d = 20:10:110
   M = MultivariateStats.fit(MultivariateStats.PCA, X[1:(n - test),:]'; method = :svd, maxoutdim = d);
   X1 = transform(M, X')';
   println(d,", Built in PCA, ",run_tests(X1, y))
-  B = SimpleSketch(X[1:(n - test),:], 2*d)
+  B = SimpleSketch(X[1:(n - test),:], d)
   u, s, v = svd(B);
   X3 = X*v[:,1:d];
   println(d,", FrequentDirections, ",run_tests(X3, y))
