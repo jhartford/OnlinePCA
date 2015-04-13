@@ -1,0 +1,205 @@
+\documentclass[11pt, oneside]{amsart}
+\usepackage[margin=1.3in]{geometry}                % See geometry.pdf to learn the layout options. There are lots.
+\geometry{letterpaper}                   % ... or a4paper or a5paper or ... 
+%\geometry{landscape}                % Activate for for rotated page geometry
+%\usepackage[parfill]{parskip}    % Activate to begin paragraphs with an empty line rather than an indent
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{epstopdf}
+\usepackage{caption}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{subcaption}
+\usepackage{amsmath}
+\usepackage[]{mcode}
+\usepackage{mathtools}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\prox}{prox}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\diag}{diag}
+\DeclareMathOperator*{\Lap}{Lap}
+\DeclareMathOperator*{\E}{E}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\DeclareGraphicsRule{.tif}{png}{.png}{`convert #1 `dirname #1`/`basename #1 .tif`.png}
+\bibliographystyle{unsrt}
+\title{The empirical trade-offs in Online principal component analysis}
+\author{Jason Hartford - 81307143}
+%\date{}                                           % Activate to display a given date or no date
+
+\begin{document}
+\maketitle
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+Consider the problem of supervised classification with given a dataset of training vectors $x_1, x_2, ... , x_n \, \in \, \mathcal{R}^d$, where both $n$ and $d$ are large. That is, we are given a large number of training examples each of which is in a high-dimensional space. A common preprocessing step used in machine learning and statistics is to employ Principal Component Analysis to project the training vectors into a lower dimensional subspace, $\mathcal{R}^k$, thereby reducing the dimensionality of the problem. This gives the benefit of both reducing the number of features that the classification algorithm has to consider, and reducing the amount noise in the data.
+
+Unfortunately, despite its attractiveness, the technique is too expensive to be used on very large data sets because it requires computing the full single value decomposition of the data matrix\footnote{There are more efficient ways of doing this, but we focus on SVD based approaches for the purposes of this project}. This has motivated a significant amount of work on efficiently finding rank-$k$ approximations that are close to the best rank-$k$ approximation derived from completing a full SVD. Most methods proceed by using matrix sketching techniques to approximate the original data matrix and then take the SVD smaller subproblem. For a full survey of the use of randomised algorithms for low rank approximation see \cite{Woodruff14}.
+
+%Naive implementations require multiple passes over the data, and efficient power iteration based methods still require computing the full eigenvector decomposition of the data matrix which takes $\mathcal{O}(d^3)$ operations, while more efficient power iteration methods can reduce this to $\mathcal{O}(k d^2)$ where $k$ is the dimensionality of the subspace. 
+
+In order to overcome the $d^2$ factor \cite{onlinepca} proposed an approximation algorithm which achieves,
+\[
+ALG \leq OPT_k + \epsilon \|X\|_F^2
+\]
+using $\mathcal{O}(dk/\epsilon^3)$ operations and $\mathcal{O}(dk/\epsilon^3)$ space. This appears promising but the dependance of the error on the Frobenius norm of the matrix, $ \|X\|_F^2$ and the $\epsilon^3$ factor in the number of operations may limit its usefulness in practice. 
+
+I aim to test this empirically on both simulated and real datasets. I will compare the reconstruction error and computational efficiency of the algorithm with respect to the optimal performance (computed using offline PCA) and to the random projections method of \cite{sarlos} which leverages a Johnson Lindenstrauss property to achieve its dimensionality reduction. 
+
+
+
+\section{Online PCA algorithm}
+In \cite{onlinepca}, the authors present two variants of an online PCA algorithm. Algorithm 1 is relatively inefficient and makes some simplifying assumptions about the input matrix, but is useful in building the intuition behind Algorithm 2. As a result, we present both even though the focus of this paper is on the latter algorithm.
+
+\subsection{Algorithm 1}
+
+Essentially, the online PCA algorithm works by ensuring that at every iteration, $t$, the residuals that result from the mapping of vector $x_t$ to $y_t$ don't get ``too large." It achieves this by  maintaining the invariant that $\| C_t\|_2 < 2 \| X\|_F^2/l$ where $\|C_t\|_2$ is the spectral norm of the covariance matrix of the residuals after iteration $t$ and $\| X\|_F^2$ is the Frobenius norm of the input matrix $X$; and ``improving" the matrix $U$ which maps $x_t$ to $y_t$ if the condition fails.
+
+To see this more formally, let us examine Algorithm \ref{PCA1}. The outer for loop keeps track of the residual errors, $r_t$ that result from the projection from $x_t$ to $y_t$ as well as the cumulative covariance of the residuals. The inner while loop ensures that the covariance of residuals remain smaller than $2\|X\|_F^2/l$, and adjusts the projection matrix $U$ if this condition is violated. This invariant is key to achieving the claimed performance, as it allows the authors to upper bound the eigenvalues of $C$ since they start at zero and are only increased by the $C + r_t r_t^T$ update, which only occurs after passing the while loop's condition. 
+
+To prove the performance bound, 
+\[
+ALG = \min_{\Phi \in \mathcal{O}^{d\times l}}\sum_{t=1}^n\|x_t - \Phi y_t\|_2^2\leq OPT_k + \epsilon \|X\|_F^2\]
+the authors show that the algorithm's performance, $ALG \leq \|R\|_F^2$ is bounded above by $OPT_k + \sqrt{4k} \|X\|_F^2\|R\|_2$ (1). They achieve this bound by decomposing $\|R\|_F^2$ into the difference between the norm of $X$, $\|X\|_F^2$, and the norm of the reconstruction of $X$, $\|\tilde{X}\|_F^2$, and then bounding $\|\tilde{X}\|_F^2$ using the properties of norms and the Cauchy-Schwarz inequality.
+
+They then use the invariant on the eigenvalues of $C$ to bound the spectral norm of the residuals, $\|R\|_2^2 \leq  2\|X\|_F^2/l$,  which when combined with (1) gives the desired performance bound when $l = \ceil{8k/\epsilon^2}$.
+
+To prove that the vectors output by the algorithm are in $\mathbb{R}^l$, they have to bound the number of eigenvectors of $C$ that are added to $U$, since $y_t = U^Tx_t$. They achieve this using a simplifying assumption on the input, $\max_t \|x\|_2^2 \leq \|X\|_F^2/l$, which is relaxed in the second version of the algorithm.
+
+\begin{algorithm}
+\caption{Online algorithm for Principal Component Analysis}
+\label{PCA1}
+\begin{algorithmic}[1]
+\Function{OnlinePCA}{$X,k,\epsilon, \|X\|_F$}
+\State $l = \ceil{8k/\epsilon^2}$
+\State $U = 0^{d\times l}$
+\State $C = 0^{d\times d}$
+\For{t = 1, ..., n}
+\State $r_t = x_t - U U^T x_t$
+\While{$\|C  + r_t r^T_t\|_2 \geq 2 \|X\|_F^2/l$}
+\State $[u, \lambda] \leftarrow \text{TopEigenVectorAndValueOf}(C)$
+\State Add $u$ to the next all-zero column of $U$
+\State $C \leftarrow C  - \lambda u u^T$
+\State $r \leftarrow x_t  -  U U^T x_t$
+\EndWhile
+\State $C \leftarrow C  + r_t r^T_t$
+\State $y_t \leftarrow U^T x_t$
+\EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Algorithm 2}
+While Algorithm 1 gives the correct output with additive error, it has three major drawbacks: It makes an assumption on the input matrix which prevents worst case analysis of performance, it requires $\|X\|_F$ as an input parameter which is unrealistic in an online setting, and it requires $\Omega(d^2)$ operations per input vector $x_t$ and $\Theta(d^2)$ space in memory where $d$ is the dimensionality of the input vectors. These three concerns are addressed in Algorithm 2.
+
+In Algorithm 1, the assumption that $\max_t \|x\|_2^2 \leq \|X\|_F^2/l$ is used to ensure that we enter the while loop of the algorithm less than $l$ times. To remove this assumption, note that in the worse case, we can have at most $l$ vectors with $ \|x_i\|_2^2 \geq \|X\|_F^2/l$ since,
+\[
+\|X\|_F^2/l = \frac{1}{l}\sum_{i}\sum_{j}x_{i,j}^2 = \frac{1}{l}\sum_{i}\|x_{i}\|_2^2
+\]
+which implies that we can have at most $l$ terms in which $\|x_{i}\|_2^2 = \|X\|_F^2/l$. If we double the target dimension from $l$ to $2l$, we can add an additional unit vector $u$ to our projection matrix $U$ for each time we have a vector $\max_t \|x\|_2^2 > \|X\|_F^2/l$, thereby ensuring that the while loop condition can always be satisfied with less than 2$l$ updates to U in total. 
+
+The above analysis assumed we knew $\|X\|_F^2$, which is unrealistic in an online setting. The authors relax this assumption to requiring $\|x_t\|_2^2 \leq \|x_1\|_2^2 \text{poly}(n)$ and use Frobenius norm of the $x_i, \, i\in[t]$ seen up to time $t$ as an estimate of $\|X\|_F^2$.
+
+Finally, the ${O}(d^2)$ time and space requirements result from working with the $C$ matrix which is a projection of the residuals $RR^T$ onto the space spanned by $U$. Notice that $C$ is only used in comparing it's norm with our approximation of $\|X\|_F^2$, and thus the ${O}(d^2)$ time and space requirement could be reduced through matrix sketching techniques. The authors use the Frequent Directions algorithm discussed below to maintain the sketch of $C$.\\
+
+By taking these modifications together, the authors prove that Algorithm 2 guarantees $ALG_l  \leq OPT_k + \epsilon \|X\|_F^2$, where $l$ is at most $k/\delta^3$ where $\delta = \min\{\epsilon, \epsilon^2 \|X\|^2_F/OPT\}$. The algorithm requires $O(ndk/\delta^3 + log(n)dk^3/\delta^6)$ operations and $O(dk/\delta^3)$ space.
+
+Unfortunately, while Algorithm 2 is more robust to extreme input, its large constants that result from the $\epsilon^3$ term make it only useful when dealing with massive data matrices. As a result, for the purposes of this report, we focused on studying the performance of Algorithm 1 which uses a similar approach but has smaller space requirements because of its stronger assumptions on the input.
+
+\section{The Frequent Directions Algorithm}
+The Frequent Directions algorithm is an extension of the Misra-Gries Frequent Items algorithm for estimating counts of items in streaming data. To show the connection, we begin by briefly reviewing the Frequent Items algorithm before describing the Frequent Directions algorithm.
+
+\subsection{Frequent Items}
+The Frequent Items algorithm is a simple deterministic algorithm for estimating the counts of items in a stream. Given a stream $A = \{a_1, ... , a_n\}$ with $a_i \in [d]$ we can estimate the frequency of occurrences of $a_i$ in space $l < d$ using the following procedure:
+\begin{itemize}
+\item Initialise $l$ counters to 0
+\item For each $a_i$, if the value has been observed perviously, increment its associated counter, else increment one of the 0-valued counters.
+\item If no 0-valued counters remain, decrement all $l$ counters by 1.
+\end{itemize}
+
+The algorithm then returns approximate frequencies $\hat{f}_j$ where $0\leq f_j - \hat{f}_j \leq n/l$ since no item can be decremented more than $n/l$ times because each time we decrement, we remove $l$ items and as we only have $n$ items in total.  
+
+\subsection{Frequent Directions}
+Frequent Directions is a conceptually-simple, deterministic algorithm that is optimal with respect to sketch size and resulting accuracy (but not to run time). It was first described in \cite{Liberty2013} and later presented with a more complete theoretical treatment in \cite{FreqDirections}. Intuitively, the algorithm follows a Misra-Gries approach by keeping the last row of sketch matrix, $B$, as the zero vector. It does this by calculating the SVD of the sketch matrix at every iteration and reducing all the elements of the diagonal matrix, $\Sigma$, by the magnitude of the last element.
+
+This process is shown in Algorithm \ref{freq}\footnote{For consistency of notation with the previous section, we use $X$ to denote the input matrix instead of the variable $A$ used in the original paper.}. In every iteration of the for loop, we calculate the SVD of $B$ and then ``shrink" the values of the resulting singular values by the magnitude of the smallest singular value, $ \sigma_l^2$. 
+
+For the first $l-1$ iterations of the algorithm, $ \sigma_l^2$ is zero, so at every iteration, $B_{[1:t]}$ is just a rotated version of the original $X_{[1:t]}$ (it is rotated because we do not multiply the $\hat{\Sigma}V^T$ term by the final rotation $U$). Thereafter, at every iteration we reduce all the singular values in $\Sigma$ by $\delta$ to produce $\hat{\Sigma}$. Recall that the singular values of a matrix can be interpreted as a scaling operation in the direction of each basis vector in $V$, and thus by reducing the singular values by $\delta$, every point in $B$ is moved $\delta$ units towards the origin along each basis vector and since the smallest singular value equals $\delta$, it shrinks the last coordinate to zero. This has the effect of only reducing the norm of each orthogonal vector by $\delta$, but reducing the Frobenius norm of the matrix $B$ by $l\delta$. Thus the Frobenius norm is shrunk $l$ times faster than each orthogonal vector, but is always positive which ensures that no vector is shrunk ``too much" such that it is negative. 
+
+\begin{algorithm}
+\caption{Frequent Directions}
+\label{freq}
+\begin{algorithmic}[1]
+\Function{FrequentDirections}{$X\in \mathbb{R}^{n\times d},l$}
+\State $B \leftarrow 0^{l \times d}$
+\For{$t = 1, ..., n$}
+\State $B_l \leftarrow a_i$
+\State $U, \Sigma, V = \text{svd}(B)$
+\State $\delta \leftarrow \sigma_l^2$
+\State $\hat{\Sigma}\leftarrow\sqrt{\Sigma^2 - \delta I_l}$
+\State $B \leftarrow \hat{\Sigma} V^T$
+\EndFor
+\State \Return $B$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+The important properties of Frequent Directions are summarised by Theorem 1.1 and 1.2 in \cite{FreqDirections}. Theorem 1.1 shows that $B$ is a good approximation of $X$ by comparing the norms of $By$ and $Xy$ for any unit vector $y$. It states that for any input matrix $X \in \mathbb{R}^{n\times d}$, the algorithm produces a sketch $B\in \mathbb{R}^{l\times d}$ such that for any unit vector $y\in \mathbb{R}^d$,
+\[
+0 \leq \|Xy\|^2 - \|By\|^2 \leq \|X - X_k\|_F^2/(l - k)\]
+where $X_k$ is the optimal rank-$k$ approximation of X. With $l = \ceil{k + 1/\epsilon}$this bound implies an error of $\epsilon \|X - X_k\|_F^2$ in $O(d(k+\epsilon))$ space (which is optimal by Theorem 1.3).
+
+Theorem 1.2 bounds the error of a rank-$k$ approximation of $X$ derived from the sketch produced by the Frequent Directions algorithm. Let $\pi^k_B(X) $ be the projection of $X$ onto the top $k$ singular vectors of $B$, with $\pi^k_B(X) = XV_k^TV_k$ where $V$ is the matrix of right singular vectors of $B$. Then if $B \in \mathbb{R}^{l\times d}$ is the output of Frequent Directions, for all $k < l$,
+\[
+ \|X - \pi^k_B(X)\|_F^2 \leq (1 + \frac{k}{l-k}) \|X - X_k\|_F^2
+\]
+and with $l = \ceil{k + \frac{k}{\epsilon}}$,  we have $ \|X - \pi^k_B(X)\|_F^2 \leq (1+\epsilon) \|X - X_k\|_F^2$ using $O(l d) = O(kd/\epsilon)$ space which is optimal by Theorem 1.4.
+
+Notice that for both theorems, the error depends on $\|X - X_k\|_F^2$ which will be small in datasets in which data in the first $k$ support vectors make up the majority of variance. This is a useful property in practice as it implies that the datasets on which our sketches will have smaller errors are precisely those datasets for which low rank approximation operations are appropriate.
+
+\section{Experimental Results}
+Online PCA's most appealing feature is that it outputs $y_t$, an $l$ dimensional approximation of $x_t$ at every iteration without requiring a second pass through the data, and thus even in an infinite stream of data, the algorithm is able to output and error bounded approximation of $x_t$ at every time step. Unfortunately, the error bound depends on $\|X\|^2_F$, the square Frobenius norm of the data which is potentially very large.
+
+To assess its real-world performance we compare it to Frequent Directions, which is an optimal approximation (with respect to space requirements) and the offline true PCA performance in classification tasks. We argue this is a particularly useful metric in assessing the real-world usefulness of an approximate PCA algorithm for two reasons:
+\begin{itemize}
+\item PCA as a preprocessing step in data analysis is arguably the most common use of the algorithm. Practitioners are typically only interested in the error rate of the reconstruction insofar as it affects the accuracy of the downstream prediction algorithm.
+\item The online PCA algorithm works by greedily adding the best estimate of the largest eigenvector of the data's covariance matrix to the projection matrix $U$ whenever the residuals get ``too large." If these eigenvectors are the most useful features in the classification task (as is typically the case), the online PCA algorithm may succeed in good performance in spite of weak error bounds. 
+\end{itemize} 
+
+\subsection{Data}
+
+We consider performance on two datasets, a synthetic dataset which is constructed such that there is a known amount of signal an noise (described below), and a simplified version of the well-known MNIST dataset \cite{mnist}.
+
+\subsubsection{Synthetic Data}
+We generated synthetic data in a similar manner to \cite{Liberty2013}. Our feature matrix $X$ consists of $d$ dimensional signal and $m$ dimensional noise. Specifically, $X\in \mathbb{R}^{m\times n}$
+\[
+X = U \Sigma V'
+\]
+where $U \in \mathbb{R}^{m\times d}\sim \mathcal{N}(0,1)$, $\Sigma = $ diag$(f(1), f(2), ..., f(n))$ where $f(x)$ is either a linear or exponentially decreasing function of $x$, V is the the orthogonal $Q$ component of a $QR$ decomposition of a random uniform matrix $\in \mathbb{R}^{n\times d}$. This gives a matrix with diminishing singular values. Using $X$ we construct a vector of probabilities using the typical logistic function,
+\[
+p = \frac{1}{1+ \exp(-X\beta)}
+\]
+where $\beta$ is the vector of true weights, the first $d$ of which are random uniform weights and the last $n-d$ of which are zero. The observed class labels are sampled such that, $y_i \sim \mathcal{B}(1, p_i)$.
+
+\subsubsection{MNIST}
+MNIST is a dataset consisting of 60 000 labeled handwritten digits from 0 to 9. For the ``real world" classification task we used the MNIST dataset and trained a logistic regression classifier to recognise which digits were $5$'s given the pixel values of the input. This is a simplification from the usual task to correctly label each of the 10 digits. Logistic regression classifiers are far from optimal for this task, but provide a useful benchmark of a simple classifiers' performance.
+
+\subsection{Perfomance}
+\subsubsection{MNIST}
+\subsubsection{MNIST}
+On the MNIST dataset, we considered classification accuracy when varying the target dimension $d$ of the PCA operation. The results are summarised in the table 
+
+% Online has bound X, frequent directions has bound Y, Opt - we compare the three in terms of performance in a simple classification task
+% Generate random logistic data - measure test set accuracy
+% For "real world performance" we consider performance on MNIST where we try to classify one of the 10 classes vs the other 9.
+
+% Robustness to noise
+% Axes of variation
+% Speed - 
+
+\nocite{Bishop2006}
+\bibliographystyle{unsrt}
+\bibliography{randomised}
+
+\end{document}  
