@@ -1,31 +1,8 @@
 using MultivariateStats, GLM
-using Distributions: Binomial
 cd("/Users/jasonhartford/MediaFire/Documents/ComputerScience/UBC/536 - Randomised/Project")
 #X = readcsv("mnistHelper/mnist.csv")
 include("OnlinePCA.jl")
-
-
-#@time y = PCA1(X[1:500,:], 30, 0.7);
-
-logistic(X) = 1./(1 + exp(-X));
-
-function randsignalmat(m, n, d)
-  U = randn(m, d);
-  V, = qr(rand(n, d));
-  Σ = diagm(2.0.^ (-1:-1:-d));
-  A = U * Σ * V';
-  return A, U, V, Σ;
-end
-
-function gendata(n = 1000, m = 100, d = 20, ρ = 1.0)
-  X, U, V, Σ = randsignalmat(n,m,d);
-  β = vcat(rand(d,1), zeros(m-d,1));
-  X = 50*X; # rescale X so that it covers a large part of it's space
-  p = logistic(X * β);
-  Xobs = X + rand(n,m)*ρ; # could also use rand(Normal(0,1), (n,m))
-  y = [rand(Distributions.Binomial(1, i)) for i in p];
-  return Xobs, y
-end
+include("datagen.jl")
 
 function run_tests(X, y, test_set_prop = 0.1)
   n, m = size(X);
@@ -54,9 +31,9 @@ function run_all_tests(X, y)
   X1 = transform(M, X')';
   println(run_tests(X1, y))
 
-  print("Online PCA 1, ")
-  X2 = PCA1(X, d, 0.35)
-  println(run_tests(X2[:,1:d], y))
+ # print("Online PCA 1, ")
+ # X2 = PCA1(X, d, 0.35)
+ # println(run_tests(X2[:,1:d], y))
 
   print("SimpleSketch, ")
   X3 = SimpleSketch(X', d)'
@@ -65,17 +42,37 @@ function run_all_tests(X, y)
   print("Online PCA 2, ")
   X4 = PCA2(X, d, 0.35, 100)
   println(run_tests(X4[:,1:d], y))
+  return X1, X3, X4
 end
 
-n = 10000; m = 200; d = 20; test = int(0.1*n);
+n = 50000; m = 1000; d = 50; test = int(0.1*n);
 
 X, y = gendata(n, m, d, 5.0);
 
 println("Running tests on synthetic data")
 run_all_tests(X,y)
 
+print("Built in PCA, ")
+@time M = MultivariateStats.fit(MultivariateStats.PCA, X[1:n - test,:]'; method = :svd, maxoutdim = d);
+X1 = transform(M, X')';
+println(run_tests(X1, y))
+
+include("OnlinePCA.jl")
+
+@time B = SimpleSketch(X, d)
+u, s, v = svd(B);
+X3 = X*v[:,1:d];
+println(run_tests(X3, y))
+
+X2 = PCA1(X, d, 0.35)
+
+int(ceil(d/(0.3^3)))
+X4 = PCA2(X, d, 0.1, vecnorm(X, 2)^2*3, true)
+println(run_tests(X4[:,1:3], y))
+
 println("Reading MNIST data")
 X = readcsv("mnistHelper/mnist.csv");
 y = readcsv("mnistHelper/mnist-label.csv");
 println("Running tests on MNIST data")
 run_all_tests(X,y)
+
